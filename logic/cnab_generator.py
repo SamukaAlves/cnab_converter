@@ -1,6 +1,7 @@
 """
 cnab_generator.py
 Gera CNAB 240 BB — layout verificado contra o validador oficial de leiautes.
+Autor: Samuel Alves
 """
 from datetime import datetime
 
@@ -45,6 +46,30 @@ def _chk(l, ctx=""):
         raise ValueError(f"Linha {len(l)} chars ≠ 240{' ['+ctx+']' if ctx else ''}")
 
 
+def _tipo_inscricao(doc: str) -> str:
+    """
+    Retorna '1' para CPF (até 11 dígitos) ou '2' para CNPJ (14 dígitos).
+    Usado no Segmento A (1 char) e Segmento B (1 char).
+    """
+    digits = _nums(doc)
+    return "1" if len(digits) <= 11 else "2"
+
+
+def _fmt_doc_seg_a(doc: str) -> str:
+    """
+    Formata o documento para o campo Nº Inscrição do Favorecido no Segmento A.
+    O BB exige 15 chars nesse campo:
+      - CPF  (11 dígitos): zfill(11) + 4 espaços  → ex: "00100004285" + "    "
+      - CNPJ (14 dígitos): zfill(14) + 1 espaço   → ex: "12345678000190" + " "
+    Isso garante que o validador do banco aceite corretamente pessoa física.
+    """
+    digits = _nums(doc)
+    if len(digits) <= 11:
+        return digits.zfill(11) + "    "   # 11 + 4 = 15
+    else:
+        return digits.zfill(14)[:14] + " " # 14 + 1 = 15
+
+
 # ── gerador principal ─────────────────────────────────────────────
 class CNAB240Generator:
 
@@ -54,17 +79,37 @@ class CNAB240Generator:
         self.lt    = cfg.lote
         self.banco = cfg.codigo_banco   # '001'
 
-    def gerar(self, pagamentos: list) -> str:
+    def gerar(self, pagamentos: list, payment_date=None) -> str:
         now    = datetime.now()
         linhas = []
 
+        # Normaliza `payment_date` para um objeto datetime (ou None).
+        # `now` mantém data/hora de geração do arquivo (header arquivo).
+        # `pd_dt` é usado no header do lote e nos segmentos A como fallback.
+        pd_dt = None
+        if payment_date:
+            if isinstance(payment_date, datetime):
+                pd_dt = payment_date
+            else:
+                s = str(payment_date).strip()
+                try:
+                    if len(s) == 8 and s.isdigit():
+                        pd_dt = datetime.strptime(s, "%d%m%Y")
+                    elif "/" in s:
+                        pd_dt = datetime.strptime(s, "%d/%m/%Y")
+                    else:
+                        pd_dt = datetime.fromisoformat(s)
+                except Exception:
+                    pd_dt = None
+
         linhas.append(self._h_arq(now))
-        linhas.append(self._h_lote())
+        # Header do lote recebe a data de pagamento configurada
+        linhas.append(self._h_lote(pd_dt or now))
 
         total = 0.0
         for i, pg in enumerate(pagamentos, 1):
             total += _pv(pg.get("valor", 0))
-            linhas.append(self._seg_a(pg, i * 2 - 1, now))
+            linhas.append(self._seg_a(pg, i * 2 - 1, now, pd_dt))
             linhas.append(self._seg_b(pg, i * 2))
 
         qtd_lote  = 1 + len(pagamentos) * 2 + 1   # hdr_lote + segs + trl_lote
@@ -92,32 +137,37 @@ class CNAB240Generator:
             " "*10 + "1" +                                                # 132-142 (11)
             now.strftime("%d%m%Y") + now.strftime("%H%M%S") + _fn(1, 6) + # 143-162 (20)
             p["versao_layout_arquivo"] + "00000" +                        # 163-170 (8)
-            " "*20 + " "*20 + " "*13 + "0"*16                            # 171-239 (69): [230:240]='0000000000'
+            " "*20 + " "*20 + " "*13 + "0"*16                            # 171-239 (69)
         )
 
     # ── Header Lote ───────────────────────────────────────────────
-    # [000:172] campos fixos (172 chars)
-    # [172:177] = "00000"
-    # [177:240] = 53sp + "0000000000" → [230:240]='0000000000'
-    def _h_lote(self):
+    # Recebe `data_pagamento` (datetime) para preencher campo data do lote.
+    # Posições 177-184: data de pagamento DDMMAAAA (8 chars)
+    # Layout total: 240 chars
+    def _h_lote(self, data_pagamento: datetime = None):
         p, lt = self.p, self.lt
+        dt_str = (data_pagamento or datetime.now()).strftime("%d%m%Y")
         return (
             self.banco + "0001" + "1" + "C" +                             # 000-007 (8)
-            _fn(lt["tipo_servico"], 2) + _fn(lt["forma_lancamento"], 2) + # 009-012 (4)
-            p["versao_layout_lote"] + " " + "2" +                         # 013-017 (5)
+            _fn(lt["tipo_servico"], 2) + _fn(lt["forma_lancamento"], 2) + # 008-011 (4)
+            p["versao_layout_lote"] + " " + "2" +                         # 012-017 (6)
             p["cnpj"] + p["convenio"] + p["codigo_bb2"] + " "*7 +         # 018-051 (34)
             p["agencia"] + "0" + p["dv_agencia"] +                        # 052-057 (6)
             p["conta"] + p["dv_conta"] + p["dv_ag_conta"] +               # 058-071 (14)
             _fa(p["nome_empresa"], 30) +                                  # 072-101 (30)
             " "*40 + " "*30 +                                             # 102-171 (70)
             "00000" +                                                     # 172-176 (5)
-            " "*53 + "0000000000"                                         # 177-239 (63): [230:240]='0000000000'
+            dt_str +                                                      # 177-184 (8) data pagamento
+            "00000000" + "0"*8 +                                          # 185-200 (16) zeros
+            " "*29 + "0000000000"                                         # 201-239 (39)
         )
 
     # ── Segmento A ────────────────────────────────────────────────
-    def _seg_a(self, pg, seq, now):
-        cam   = str(self.lt.get("camara", "018")).zfill(3)[:3]
-        banco = str(pg.get("banco", "000")).zfill(3)[:3]
+    # Ajustes:
+    #   1. forma_lancamento=01: câmara="000", banco destino="001" (BB)
+    #   2. tipo_inscricao dinâmico: 1=CPF, 2=CNPJ
+    #   3. documento formatado com 15 chars corretos para CPF/CNPJ
+    def _seg_a(self, pg, seq, now, payment_now=None):
         ag5   = str(pg.get("agencia5", "00000")).zfill(5)[:5]
         dv_ag = str(pg.get("dv_agencia", " "))[:1]
         ct12  = str(pg.get("conta12", "0"*12)).zfill(12)[:12]
@@ -125,14 +175,35 @@ class CNAB240Generator:
         dv_ac = str(pg.get("dv_ag_conta", " "))[:1]
         nome  = _fa(pg.get("nome", ""), 30)
         snm   = _fa(pg.get("seu_numero", ""), 20)
-        data  = _date(pg.get("data_pagamento", ""), now)
+        data  = _date(pg.get("data_pagamento", ""), payment_now or now)
         val   = _pv(pg.get("valor", 0))
+
+        # Tipo de inscrição e documento do favorecido
+        doc_raw = str(pg.get("documento", ""))
+        ti      = _tipo_inscricao(doc_raw)   # '1' = CPF, '2' = CNPJ
+        doc_fmt = _fmt_doc_seg_a(doc_raw)    # 15 chars (CPF ou CNPJ formatado)
+
+        # forma_lancamento determina câmara e banco destino
+        forma     = str(self.lt.get("forma_lancamento", "03")).zfill(2)
+        cam_cfg   = str(self.lt.get("camara", "018")).zfill(3)[:3]
+        banco_pg  = str(pg.get("banco", "000")).zfill(3)[:3]
+
+        if forma == "01":
+            # Transferência entre contas BB: câmara não se aplica, banco = 001
+            cam_seg   = "000"
+            banco_seg = "001"
+        else:
+            cam_seg   = cam_cfg
+            banco_seg = banco_pg
+
         return (
-            self.banco + "0001" + "3" + _fn(seq, 5) + "A" + "0" + "00" +
-            cam + banco + ag5 + dv_ag + ct12 + dv_c + dv_ac + nome + snm +
-            data + "BRL" + "0"*15 + _vc(val) +
-            " "*20 + "00000000" + "0"*15 +
-            " "*20 + " "*5 + " "*8 + " "*19 + "0"*11
+            self.banco + "0001" + "3" + _fn(seq, 5) + "A" + "0" + "00" +  # 000-016 (17)
+            cam_seg + banco_seg + ag5 + dv_ag + ct12 + dv_c + dv_ac +      # 017-043 (26)
+            nome + snm +                                                    # 043-093 (50)
+            data + "BRL" + "0"*15 + _vc(val) +                             # 093-134 (41)
+            " "*20 + "00000000" + "0"*15 +                                 # 134-177 (43)
+            ti + doc_fmt +                                                  # 177-193 (16): tipo(1)+doc(15)
+            " "*4 + " "*5 + " "*8 + " "*19 + "0"*11                        # 193-240 (47)
         )
 
     # ── Segmento B ────────────────────────────────────────────────
@@ -168,31 +239,33 @@ class CNAB240Generator:
         )
 
 
-#  CNABGenerator (compatível com app.py) 
+#  CNABGenerator (compatível com app.py)
 class CNABGenerator:
     def __init__(self, cfg):
         self.cfg = cfg
 
-    def generate(self, df, tipo_pagamento="PGA", num_lote=1):
+    def generate(self, df, tipo_pagamento="PGA", num_lote=1, payment_date=None):
         gen  = CNAB240Generator(self.cfg)
         tipo = str(tipo_pagamento).upper()
         pags = self._apl(df) if tipo in ("APLICACAO", "APLICACOES") else self._pag(df)
-        return gen.gerar(pags)
+        return gen.gerar(pags, payment_date=payment_date)
 
     def _pag(self, df):
+        from logic.excel_reader import _split_agencia_bb, _split_conta_bb
         res = []
         for _, r in df.iterrows():
-            banco = _nums(r.get("banco", "")).zfill(3)[:3]
-            ag5   = _nums(r.get("agencia", "")).zfill(5)[-5:]
-            ct12  = _nums(r.get("conta", "")).zfill(12)[-12:]
-            doc   = _nums(r.get("cpf_cnpj", "")).zfill(14)
-            nome  = str(r.get("nome", "")).strip()
-            val   = _pv(r.get("valor", 0))
+            banco        = _nums(r.get("banco", "")).zfill(3)[:3]
+            ag4, dv_ag   = _split_agencia_bb(r.get("agencia", ""))
+            ct12, dv_ct  = _split_conta_bb(r.get("conta", ""))
+            doc          = _nums(r.get("cpf_cnpj", ""))
+            nome         = str(r.get("nome", "")).strip()
+            val          = _pv(r.get("valor", 0))
             if not (banco and nome and doc and val > 0): continue
             res.append({
                 "nome": nome, "documento": doc, "banco": banco,
-                "agencia5": ag5, "dv_agencia": " ", "conta12": ct12,
-                "dv_conta": " ", "dv_ag_conta": " ", "valor": val,
+                "agencia5": ag4.zfill(5), "dv_agencia": dv_ag,
+                "conta12": ct12, "dv_conta": dv_ct, "dv_ag_conta": " ",
+                "valor": val,
                 "seu_numero": str(r.get("identificador", "")).strip(),
                 "data_pagamento": str(r.get("data_pagamento", "")).strip(),
             })
@@ -213,7 +286,7 @@ class CNABGenerator:
             if not cc: raise ValueError(f"Fundo '{fundo}' não encontrado no config.json")
             res.append({
                 "nome":        str(cc.get("nome", fundo))[:30].ljust(30),
-                "documento":   _nums(cc.get("cnpj", "")).zfill(14),
+                "documento":   _nums(cc.get("cnpj", "")),
                 "banco":       banco, "agencia5": ag5, "dv_agencia": dv_ag,
                 "conta12":     str(cc.get("conta", "")).zfill(12)[:12],
                 "dv_conta":    str(cc.get("dv_conta", " "))[:1], "dv_ag_conta": " ",

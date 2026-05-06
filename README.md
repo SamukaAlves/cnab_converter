@@ -1,14 +1,24 @@
 # Conversor Excel -> CNAB 240 (Banco do Brasil)
 
-Aplicacao desktop em Python para converter planilhas Excel em arquivos de remessa CNAB 240.
+Aplicacao desktop em Python para converter planilhas Excel em arquivos de remessa CNAB 240, com suporte a perfis de pagador, leitura automatica de layouts e geracao de TXT validado.
 
 ## Funcionalidades
 
-- Conversao de Excel para CNAB 240 (segmentos A e B).
-- Suporte a dois perfis de pagador no `config/config.json` (ex.: PGA e BBJUSMP).
-- Leitura de planilhas de pagamentos e de aplicacoes.
-- Geracao de arquivo `.txt` com linhas de 240 caracteres.
-- Interface grafica em PyQt5.
+- Converte planilhas de pagamento em arquivos CNAB 240 para o Banco do Brasil.
+- Gera registros dos segmentos A e B, com validacao de tamanho fixo em 240 caracteres.
+- Suporta dois perfis de pagador no `config/config.json`, como PGA e BBJUSMP.
+- Lê planilhas de pagamentos e de aplicacoes, identificando colunas mesmo com aliases diferentes.
+- Normaliza agencia, conta, documento e valor antes da geracao do arquivo.
+- Permite informar data de pagamento para compor o header do lote e os segmentos.
+- Exporta o resultado em arquivo `.txt` com nome padronizado por data e hora.
+- Oferece interface grafica em PyQt5 para uso direto no desktop.
+
+## O que o sistema faz
+
+1. Carrega a configuracao em `config/config.json`.
+2. Identifica se a planilha enviada e de pagamentos ou aplicacoes.
+3. Processa os dados, ajusta campos bancarios e monta o layout CNAB.
+4. Gera o arquivo final para envio ao Banco do Brasil.
 
 ## Requisitos
 

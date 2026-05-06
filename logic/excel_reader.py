@@ -13,6 +13,46 @@ def _only_numbers(v) -> str:
     return "".join(c for c in str(v or "") if c.isdigit())
 
 
+def _split_agencia_bb(ag_raw) -> tuple:
+    """
+    Separa agência e DV para o BB.
+    BB Segmento A: campo agência = 4 dígitos, DV agência = 1 dígito (campos separados).
+    A planilha pode trazer o DV embutido no final do número de agência:
+      - 5 dígitos → primeiros 4 = agência, último = DV
+      - 4 dígitos → agência pura, DV = '0'
+      - 6+ dígitos → últimos 5 divididos da mesma forma
+    Retorna: (ag4: str, dv_ag: str)
+    """
+    digits = _only_numbers(ag_raw)
+    if len(digits) == 5:
+        return digits[:4], digits[4]
+    elif len(digits) == 4:
+        return digits, "0"
+    elif len(digits) > 5:
+        return digits[-5:-1], digits[-1]
+    else:
+        return digits.zfill(4), "0"
+
+
+def _split_conta_bb(ct_raw) -> tuple:
+    """
+    Separa conta e DV para o BB.
+    BB Segmento A: campo conta = 12 dígitos, DV conta = 1 dígito (campos separados).
+    Regra: o último dígito é SEMPRE o DV, independente do tamanho.
+      - 2+ dígitos → tudo exceto o último = conta, último = DV
+      - 1 dígito   → conta = '0' * 12, DV = esse dígito
+      - vazio      → conta = '0' * 12, DV = '0'
+    Retorna: (ct12: str zfilled 12, dv_ct: str)
+    """
+    digits = _only_numbers(ct_raw)
+    if len(digits) >= 2:
+        return digits[:-1].zfill(12)[-12:], digits[-1]
+    elif len(digits) == 1:
+        return "0" * 12, digits[0]
+    else:
+        return "0" * 12, "0"
+
+
 def _parse_valor(v) -> float:
     raw = str(v or "").strip().replace("R$","").replace(" ","")
     if "," in raw and "." in raw:
@@ -197,16 +237,17 @@ class ExcelReader:
         result = []
         for _, r in df.iterrows():
             banco = _only_numbers(r.get("banco","")).zfill(3)[:3]
-            ag5   = _only_numbers(r.get("agencia","")).zfill(5)[-5:]
-            ct12  = _only_numbers(r.get("conta","")).zfill(12)[-12:]
-            doc   = _only_numbers(r.get("cpf_cnpj","")).zfill(14)
+            ag4, dv_ag = _split_agencia_bb(r.get("agencia",""))
+            ct12, dv_ct = _split_conta_bb(r.get("conta",""))
+            doc   = _only_numbers(r.get("cpf_cnpj",""))
             nome  = str(r.get("nome","")).strip()
             valor = _parse_valor(r.get("valor",""))
             if not (banco and nome and doc and valor > 0): continue
             result.append({
                 "nome":nome,"documento":doc,"banco":banco,
-                "agencia5":ag5,"dv_agencia":" ","conta12":ct12,
-                "dv_conta":" ","dv_ag_conta":" ","valor":valor,
+                "agencia5":ag4.zfill(5),"dv_agencia":dv_ag,
+                "conta12":ct12,"dv_conta":dv_ct,"dv_ag_conta":" ",
+                "valor":valor,
                 "seu_numero":str(r.get("identificador","")).strip(),
                 "data_pagamento":str(r.get("data_pagamento","")).strip(),
             })
@@ -226,7 +267,7 @@ class ExcelReader:
             if not cc: raise ValueError(f"Fundo '{fundo}' não encontrado no config.json")
             result.append({
                 "nome":str(cc.get("nome",fundo))[:30].ljust(30),
-                "documento":_only_numbers(cc.get("cnpj","")).zfill(14),
+                "documento":_only_numbers(cc.get("cnpj","")),
                 "banco":banco,"agencia5":ag5,"dv_agencia":dv_ag,
                 "conta12":str(cc.get("conta","")).zfill(12)[:12],
                 "dv_conta":str(cc.get("dv_conta"," "))[:1],"dv_ag_conta":" ",

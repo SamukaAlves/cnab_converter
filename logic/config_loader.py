@@ -137,6 +137,12 @@ class ConfigLoader:
         p["versao_layout_arquivo"] = str(p["versao_layout_arquivo"]).zfill(3)[:3]
         p["versao_layout_lote"]    = str(p["versao_layout_lote"]).zfill(3)[:3]
 
+        # Normaliza forma_lancamento: garante 2 chars numéricos
+        lt = self._data["lote"]
+        lt["forma_lancamento"] = str(lt["forma_lancamento"]).zfill(2)[:2]
+        lt["tipo_servico"]     = str(lt["tipo_servico"]).zfill(2)[:2]
+        lt["camara"]           = str(lt["camara"]).zfill(3)[:3]
+
     # ── properties ────────────────────────────────────────────────
     @property
     def pagador(self)       -> dict: return self._data["pagador"]
