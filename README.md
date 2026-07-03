@@ -1,4 +1,7 @@
 # Conversor Excel -> CNAB 240 (Banco do Brasil)
+<img width="1911" height="1030" alt="image" src="https://github.com/user-attachments/assets/bed706cd-d45c-4dd8-9f46-b1193676364e" />
+
+
 
 Aplicacao desktop em Python para converter planilhas Excel em arquivos de remessa CNAB 240, com suporte a perfis de pagador, leitura automatica de layouts e geracao de TXT validado.
 
