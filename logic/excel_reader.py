@@ -23,15 +23,31 @@ def _split_agencia_bb(ag_raw) -> tuple:
       - 6+ dígitos → últimos 5 divididos da mesma forma
     Retorna: (ag4: str, dv_ag: str)
     """
-    digits = _only_numbers(ag_raw)
-    if len(digits) == 5:
-        return digits[:4], digits[4]
-    elif len(digits) == 4:
-        return digits, "0"
-    elif len(digits) > 5:
-        return digits[-5:-1], digits[-1]
+    s = str(ag_raw or "").strip()
+    if not s:
+        return "0000", "0"
+    # aceita 'X' ou 'x' como DV final
+    last = s[-1]
+    has_x = True if last.upper() == "X" else False
+    digits = "".join(c for c in s if c.isdigit())
+    if has_x:
+        if len(digits) == 5:
+            return digits[:4], "X"
+        elif len(digits) == 4:
+            return digits, "X"
+        elif len(digits) > 5:
+            return digits[-5:-1], "X"
+        else:
+            return digits.zfill(4), "X"
     else:
-        return digits.zfill(4), "0"
+        if len(digits) == 5:
+            return digits[:4], digits[4]
+        elif len(digits) == 4:
+            return digits, "0"
+        elif len(digits) > 5:
+            return digits[-5:-1], digits[-1]
+        else:
+            return digits.zfill(4), "0"
 
 
 def _split_conta_bb(ct_raw) -> tuple:
@@ -44,13 +60,25 @@ def _split_conta_bb(ct_raw) -> tuple:
       - vazio      → conta = '0' * 12, DV = '0'
     Retorna: (ct12: str zfilled 12, dv_ct: str)
     """
-    digits = _only_numbers(ct_raw)
-    if len(digits) >= 2:
-        return digits[:-1].zfill(12)[-12:], digits[-1]
-    elif len(digits) == 1:
-        return "0" * 12, digits[0]
-    else:
+    s = str(ct_raw or "").strip()
+    if not s:
         return "0" * 12, "0"
+    last = s[-1]
+    has_x = True if last.upper() == "X" else False
+    digits = "".join(c for c in s if c.isdigit())
+    if has_x:
+        # quando o DV é 'X', os dígitos restantes formam a conta
+        if len(digits) >= 1:
+            return digits.zfill(12)[-12:], "X"
+        else:
+            return "0" * 12, "X"
+    else:
+        if len(digits) >= 2:
+            return digits[:-1].zfill(12)[-12:], digits[-1]
+        elif len(digits) == 1:
+            return "0" * 12, digits[0]
+        else:
+            return "0" * 12, "0"
 
 
 def _parse_valor(v) -> float:
@@ -80,7 +108,7 @@ def _norm_name(name: str) -> str:
 
 
 # ── detecção de tipo ───────────────────────────────────────────────
-_KW_FUNDOS = ["PGA","FCBE","HORIZONTE","HORIZONE","PROTEGIDO"]
+_KW_FUNDOS = ["PGA","FCBE","HORIZONTE","HORIZONE","PROTEGIDO","PASSIVO"]
 _KW_PAGTO  = ["BANCO","AGENCIA","CONTA","CNPJ","CPF"]
 
 
@@ -187,6 +215,8 @@ def _parse_pagamentos(df_raw):
 # ── parser: aplicações ─────────────────────────────────────────────
 _FUNDO_MAP = {
     "PGA":"PGA","FCBE":"FCBE",
+    "PASSIVO 40":"PASSIVO 2040","PASSIVO 2040":"PASSIVO 2040",
+    "PASSIVO 50":"PASSIVO 2050","PASSIVO 2050":"PASSIVO 2050",
     "HORIZONTE 40":"HORIZONE 2040","HORIZONTE 2040":"HORIZONE 2040",
     "HORIZONTE 50":"HORIZONE 2050","HORIZONTE 2050":"HORIZONE 2050",
     "PROTEGIDO":"HORIZONE PROTEGIDO","HORIZONTE PROTEGIDO":"HORIZONE PROTEGIDO",
