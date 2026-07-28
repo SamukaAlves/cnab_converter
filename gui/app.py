@@ -24,11 +24,16 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logic.config_loader import ConfigLoader, ConfigError
-from logic.excel_reader import read_excel
+from logic.excel_reader import read_excel, agrupar_pagamentos
 from logic.cnab_generator import CNABGenerator
 
-BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VISUAL_DIR = os.path.join(BASE_DIR, "visual")
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+VISUAL_DIR = resource_path("visual")
 
 def vp(f):  return os.path.join(VISUAL_DIR, f)
 def vpx(f, w, h):
@@ -834,7 +839,7 @@ class ControlPanel(Card):
         hrow.addWidget(lbl)
         outer.addWidget(hdr)
 
-        # Corpo dos controles em grid 3 colunas
+        # Corpo dos controles
         body = QFrame()
         body.setStyleSheet(f"background: {CARD}; border: none; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;")
         row = QHBoxLayout(body)
@@ -851,15 +856,25 @@ class ControlPanel(Card):
         sep1.setStyleSheet(f"border: none; border-left: 1px solid {BORDER}; background: transparent;")
         row.addWidget(sep1)
 
-        # Coluna 2: Forma de Lançamento
-        self._forma = "03"
-        row.addLayout(self._col_forma())
+        # ── COLUNA 2: Forma de Lançamento ────────────────────────
+        # DESABILITADA TEMPORARIAMENTE PARA TESTE DA CLASSIFICAÇÃO
+        # AUTOMÁTICA (excel_reader.classificar_dataframe / agrupar_pagamentos).
+        # A forma de lançamento agora é definida por linha, com base no
+        # código de barras / banco de destino, e não mais escolhida manualmente.
+        # Reativar removendo os comentários abaixo caso seja necessário
+        # voltar ao modo manual (single-forma) no futuro.
+        #
+        # self._forma = "03"
+        # row.addLayout(self._col_forma())
+        #
+        # sep2 = QFrame()
+        # sep2.setFrameShape(QFrame.VLine)
+        # sep2.setStyleSheet(f"border: none; border-left: 1px solid {BORDER}; background: transparent;")
+        # row.addWidget(sep2)
 
-        # Separador
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.VLine)
-        sep2.setStyleSheet(f"border: none; border-left: 1px solid {BORDER}; background: transparent;")
-        row.addWidget(sep2)
+        # Mantém o valor default internamente (não exposto na UI),
+        # para não quebrar quem ainda lê self._forma / forma_lancamento.
+        self._forma = "03"
 
         # Coluna 3: Data de Pagamento
         row.addLayout(self._col_data())
@@ -906,21 +921,29 @@ class ControlPanel(Card):
         col.addWidget(self._btn_jusmp)
         return col
 
-    def _col_forma(self) -> QVBoxLayout:
-        col = QVBoxLayout(); col.setSpacing(8)
-        col.addWidget(self._lbl_group("FORMA DE LANÇAMENTO"))
-        rs = self._radio_style()
-        self._btn_f03 = QRadioButton("03 – DOC / TED"); self._btn_f03.setChecked(True); self._btn_f03.setStyleSheet(rs)
-        self._btn_f01 = QRadioButton("01 – Transf. BB"); self._btn_f01.setStyleSheet(rs)
-        self._grp_forma = QButtonGroup()
-        self._grp_forma.addButton(self._btn_f03, 0)
-        self._grp_forma.addButton(self._btn_f01, 1)
-        self._grp_forma.buttonClicked.connect(
-            lambda b: setattr(self, "_forma", "01" if b is self._btn_f01 else "03")
-        )
-        col.addWidget(self._btn_f03)
-        col.addWidget(self._btn_f01)
-        return col
+    # ── DESABILITADO TEMPORARIAMENTE (ver comentário no __init__) ──
+    # def _col_forma(self) -> QVBoxLayout:
+    #     col = QVBoxLayout(); col.setSpacing(8)
+    #     col.addWidget(self._lbl_group("FORMA DE LANÇAMENTO"))
+    #     rs = self._radio_style()
+    #     self._btn_f03 = QRadioButton("03 – DOC / TED"); self._btn_f03.setChecked(True); self._btn_f03.setStyleSheet(rs)
+    #     self._btn_f01 = QRadioButton("01 – Transf. BB"); self._btn_f01.setStyleSheet(rs)
+    #     self._btn_f30 = QRadioButton("30 – Boleto BB"); self._btn_f30.setStyleSheet(rs)
+    #     self._btn_f31 = QRadioButton("31 – Boleto Outros"); self._btn_f31.setStyleSheet(rs)
+    #     self._grp_forma = QButtonGroup()
+    #     self._grp_forma.addButton(self._btn_f03, 0)
+    #     self._grp_forma.addButton(self._btn_f01, 1)
+    #     self._grp_forma.addButton(self._btn_f30, 2)
+    #     self._grp_forma.addButton(self._btn_f31, 3)
+    #     _forma_map = {0: "03", 1: "01", 2: "30", 3: "31"}
+    #     self._grp_forma.idClicked.connect(
+    #         lambda id: setattr(self, "_forma", _forma_map.get(id, "03"))
+    #     )
+    #     col.addWidget(self._btn_f03)
+    #     col.addWidget(self._btn_f01)
+    #     col.addWidget(self._btn_f30)
+    #     col.addWidget(self._btn_f31)
+    #     return col
 
     def _col_data(self) -> QVBoxLayout:
         col = QVBoxLayout(); col.setSpacing(8)
@@ -989,27 +1012,64 @@ class ConversionWorker(QThread):
 
     def run(self):
         cfg_exec = ConfigLoader(self._cfg.config_path, tipo_pagamento=self._tipo)
-        if self._forma:
-            cfg_exec.lote["forma_lancamento"] = str(self._forma).zfill(2)
         gen = CNABGenerator(cfg_exec)
         success = errors = 0
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         for filepath, data in self._files.items():
             fname = os.path.basename(filepath)
-            try:
-                if self._modo == "aplicacoes":
+            base  = os.path.splitext(fname)[0]
+
+            if self._modo == "aplicacoes":
+                # ── fluxo antigo, inalterado ─────────────────────
+                try:
                     content = gen.generate(data["df"], tipo_pagamento="APLICACAO")
-                else:
-                    content = gen.generate(data["df"], tipo_pagamento=self._tipo,
-                                           payment_date=self._payment_date)
-                base    = os.path.splitext(fname)[0]
-                now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-                out     = os.path.join(self._output_dir, f"CNAB_{base}_{now_str}.txt")
-                with open(out, "w", encoding="ascii", errors="replace") as f:
-                    f.write(content)
-                self.file_done.emit(filepath, True); success += 1
-            except Exception as e:
-                self.log_signal.emit(f"Erro em {fname}: {e}", "error")
+                    out = os.path.join(self._output_dir, f"CNAB_{base}_{now_str}.txt")
+                    with open(out, "w", encoding="ascii", errors="replace") as f:
+                        f.write(content)
+                    self.file_done.emit(filepath, True); success += 1
+                except Exception as e:
+                    self.log_signal.emit(f"Erro em {fname}: {e}", "error")
+                    self.file_done.emit(filepath, False); errors += 1
+                continue
+
+            # ── fluxo novo: classifica, agrupa, gera 1 arquivo por grupo ──
+            df = data["df"]
+            grupos = agrupar_pagamentos(df)
+
+            if not grupos:
+                self.log_signal.emit(f"{fname}: nenhum pagamento válido para classificar.", "error")
                 self.file_done.emit(filepath, False); errors += 1
+                continue
+
+            gerou_algum = False
+            for (tipo_grp, forma_grp), sub_df in grupos.items():
+                if sub_df.empty:
+                    continue
+                try:
+                    content = gen.generate(
+                        sub_df,
+                        tipo_pagamento=self._tipo,
+                        payment_date=self._payment_date,
+                        forma_lancamento=forma_grp,   # ← forma vem do grupo, nunca fixa
+                    )
+                    out = os.path.join(
+                        self._output_dir, f"CNAB_{tipo_grp}_{base}_{now_str}.txt"
+                    )
+                    with open(out, "w", encoding="ascii", errors="replace") as f:
+                        f.write(content)
+                    gerou_algum = True
+                    self.log_signal.emit(
+                        f"{fname}: grupo {tipo_grp} ({len(sub_df)} pagamento(s)) gerado com sucesso", "info"
+                    )
+                except Exception as e:
+                    self.log_signal.emit(f"Erro no grupo {tipo_grp} de {fname}: {e}", "error")
+                    errors += 1
+
+            self.file_done.emit(filepath, gerou_algum)
+            if gerou_algum:
+                success += 1
+
         self.finished_all.emit(success, errors)
 
 
@@ -1115,6 +1175,9 @@ class AbaPagamentos(QWidget):
             payment_date=self._ctrl.payment_date,
             forma_lancamento=self._ctrl.forma_lancamento,
         )
+        self._worker.log_signal.connect(
+            lambda msg, lvl: print(f"[{lvl}] {msg}")
+        )
         self._worker.file_done.connect(self._on_done)
         self._worker.finished_all.connect(self._on_finished)
         self._worker.start()
@@ -1126,8 +1189,8 @@ class AbaPagamentos(QWidget):
     def _on_finished(self, success: int, errors: int):
         self._btn_exec.setEnabled(True)
         self._btn_exec.setText("  Processar e Gerar CNAB")
-        if success: _msgbox(self, "info", "Concluído", f"{success} arquivo(s) CNAB gerado(s) com sucesso!")
-        if errors:  _msgbox(self, "error", "Erros", f"{errors} arquivo(s) com erro.")
+        if success: _msgbox(self, "info", "Concluído", f"{success} arquivo(s) processado(s) com sucesso!")
+        if errors:  _msgbox(self, "error", "Erros", f"{errors} erro(s) durante o processamento.")
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -1213,6 +1276,9 @@ class AbaAplicacoes(QWidget):
             fc = self._ger.get_row(fp)
             if fc: fc.set_status("processando")
         self._worker = ConversionWorker(valid, self._cfg, "BBJUMP", out_dir, modo="aplicacoes")
+        self._worker.log_signal.connect(
+            lambda msg, lvl: print(f"[{lvl}] {msg}")
+        )
         self._worker.file_done.connect(self._on_done)
         self._worker.finished_all.connect(self._on_finished)
         self._worker.start()

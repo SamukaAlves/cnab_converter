@@ -4,8 +4,10 @@ Lê dois formatos de Excel:
   data(5).xlsx                  → aba 'Export'   → pagamentos
   PROGRAMACAO_DE_APLICACAO.xlsx → qualquer aba   → aplicações por fundo
 """
-import re, unicodedata
+import re, unicodedata, logging
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 # ── helpers ───────────────────────────────────────────────────────
@@ -81,6 +83,28 @@ def _split_conta_bb(ct_raw) -> tuple:
             return "0" * 12, "0"
 
 
+def _normalizar_codigo_barras(raw) -> str:
+    """
+    Corrige o artefato mais comum quando a célula de código de barras/linha
+    digitável não está formatada como Texto no Excel: o valor é lido como
+    float e vira notação científica (ex.: '1.234567890123e+46') ou ganha
+    sufixo '.0'. Reconstrói a string numérica original nesses casos.
+    Não tenta "adivinhar" zeros à esquerda perdidos — isso é ambíguo e é
+    tratado como erro de validação mais à frente (ver boleto_generator).
+    """
+    s = str(raw or "").strip()
+    if not s or s.lower() == "nan":
+        return ""
+    if re.search(r"e[+-]?\d+", s.lower()):
+        try:
+            s = format(int(float(s)), "f")
+        except Exception:
+            pass
+    elif s.endswith(".0"):
+        s = s[:-2]
+    return s
+
+
 def _parse_valor(v) -> float:
     raw = str(v or "").strip().replace("R$","").replace(" ","")
     if "," in raw and "." in raw:
@@ -117,6 +141,125 @@ def _is_aplicacoes(cols: list) -> bool:
     if any(k in j for k in _KW_PAGTO):
         return False
     return any(k in j for k in _KW_FUNDOS)
+
+
+# ── classificação de pagamentos ────────────────────────────────────
+def _classify_pagamento(row) -> tuple:
+    """
+    Classifica uma linha em (tipo_pagamento, forma_lancamento).
+
+    Fonte primária: coluna DOCUMENTO_CONTABIL (aliás 'doc_contabil'), que
+    já indica explicitamente se o pagamento é BOLETO, TRANSFERÊNCIA ou TED.
+
+    Regras:
+      1. Se DOCUMENTO_CONTABIL contém 'BOLETO':
+           código de barras começa com '8' (produto = arrecadação/convênio,
+           ex.: Claro, Sabesp, Cemig, tributos) e tem 44 ou 48 dígitos
+             → BOLETO_ARRECADACAO (forma 32 — usa Segmento O, não J!)
+           banco do código de barras (3 primeiros dígitos) == '001'
+             → BOLETO_BB      (forma 30)
+           caso contrário
+             → BOLETO_OUTROS  (forma 31)
+      2. Se contém 'TRANSF' → TRANSFERENCIA_BB (forma 01)
+      3. Se contém 'TED'    → TED_DOC          (forma 03)
+      4. Fallback (coluna ausente/vazia/valor não reconhecido):
+         mantém a regra antiga baseada em codigo_barras/banco, para
+         garantir retrocompatibilidade com planilhas sem essa coluna.
+
+    IMPORTANTE: contas de arrecadação (água, luz, telefone, tributos) usam
+    um padrão de código de barras totalmente diferente do boleto bancário
+    (produto '8' na 1ª posição, valor nas posições 5-15) e precisam do
+    Segmento O do CNAB 240 — nunca do Segmento J. Ver TributoGenerator em
+    boleto_generator.py.
+    """
+    doc_contabil = _norm_col(row.get("doc_contabil", ""))
+    cod = str(row.get("codigo_barras", "")).strip()
+    digits = _only_numbers(cod)
+    banco_cod = digits[:3] if digits else ""
+    is_arrecadacao = bool(digits) and digits[0] == "8" and len(digits) in (44, 48)
+
+    if "BOLETO" in doc_contabil:
+        if is_arrecadacao:
+            return "BOLETO_ARRECADACAO", "32"
+        if banco_cod == "001":
+            return "BOLETO_BB", "30"
+        return "BOLETO_OUTROS", "31"
+
+    if "TRANSF" in doc_contabil:
+        return "TRANSFERENCIA_BB", "01"
+
+    if "TED" in doc_contabil:
+        return "TED_DOC", "03"
+
+    # ── Fallback: DOCUMENTO_CONTABIL ausente ou não reconhecido ──────
+    if cod:
+        if is_arrecadacao:
+            return "BOLETO_ARRECADACAO", "32"
+        if banco_cod == "001":
+            return "BOLETO_BB", "30"
+        return "BOLETO_OUTROS", "31"
+
+    banco = _only_numbers(row.get("banco", ""))
+    if banco == "001":
+        return "TRANSFERENCIA_BB", "01"
+    return "TED_DOC", "03"
+
+
+def classificar_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        df = df.copy()
+        df["tipo_pagamento"] = []
+        df["forma_lancamento"] = []
+        return df
+
+    tipos, formas = [], []
+    for idx, row in df.iterrows():
+        tipo, forma = _classify_pagamento(row)
+        tipos.append(tipo)
+        formas.append(forma)
+
+        doc_contabil = str(row.get("doc_contabil", "")).strip()
+        cod = str(row.get("codigo_barras", "")).strip()
+        ref = doc_contabil or (_only_numbers(cod)[:3] if cod else _only_numbers(row.get("banco", "")))
+        logger.info("Linha %s classificada como %s (%s)", idx + 1, tipo, ref or forma)
+
+        # validação suave (não interrompe a execução)
+        if tipo in ("BOLETO_BB", "BOLETO_OUTROS", "BOLETO_ARRECADACAO"):
+            digits = _only_numbers(cod)
+            if len(digits) not in (44, 47, 48):
+                logger.warning(
+                    "Linha %s: código de barras com tamanho suspeito (%s dígitos)",
+                    idx + 1, len(digits)
+                )
+        else:
+            if not (_only_numbers(row.get("banco", "")) and str(row.get("agencia", "")).strip()
+                     and str(row.get("conta", "")).strip()):
+                logger.warning(
+                    "Linha %s: dados bancários incompletos para %s", idx + 1, tipo
+                )
+
+    df = df.copy()
+    df["tipo_pagamento"] = tipos
+    df["forma_lancamento"] = formas
+    return df
+
+
+def agrupar_pagamentos(df: pd.DataFrame) -> dict:
+    """
+    Agrupa um DataFrame de pagamentos por (tipo_pagamento, forma_lancamento).
+    Classifica automaticamente se o DataFrame ainda não tiver sido classificado.
+    Retorna: { (tipo_pagamento, forma_lancamento): DataFrame }
+    """
+    if df.empty:
+        return {}
+
+    if "tipo_pagamento" not in df.columns or "forma_lancamento" not in df.columns:
+        df = classificar_dataframe(df)
+
+    grupos = {}
+    for chave, sub in df.groupby(["tipo_pagamento", "forma_lancamento"]):
+        grupos[chave] = sub.reset_index(drop=True)
+    return grupos
 
 
 # ── leitura principal ─────────────────────────────────────────────
@@ -188,12 +331,14 @@ def _find_header(df, aba):
 _ALIAS = {
     "CONTRAPARTE":"nome","NOME":"nome",
     "CNPJ/CPF":"cpf_cnpj","CPF/CNPJ":"cpf_cnpj","CNPJ":"cpf_cnpj","DOCUMENTO":"cpf_cnpj",
-    "BANCO":"banco","AGENCIA":"agencia",
+    "BANCO":"banco",
+    "AGENCIA":"agencia",
     "AF":"identificador","NUMERO":"numero",
     "CONTA":"conta",
     "VALOR LIQUIDO":"valor","VALOR":"valor",
     "DATA":"data_pagamento",
-    "CODIGO DE BARRAS":"codigo_barras","DOCUMENTO CONTABIL":"doc_contabil",
+    "CODIGO DE BARRAS":"codigo_barras",
+    "DOCUMENTO CONTABIL":"doc_contabil",    
 }
 
 
@@ -202,6 +347,8 @@ def _parse_pagamentos(df_raw):
     df = df_raw.rename(columns=rename)
     for col in df.columns:
         df[col] = df[col].fillna("").astype(str).str.strip()
+    if "codigo_barras" in df.columns:
+        df["codigo_barras"] = df["codigo_barras"].apply(_normalizar_codigo_barras)
     required = ["nome","cpf_cnpj","banco","agencia","conta","valor"]
     missing  = [c for c in required if c not in df.columns]
     if missing:
@@ -209,6 +356,8 @@ def _parse_pagamentos(df_raw):
     df = df[df["valor"].apply(lambda v: _parse_valor(v) > 0)].reset_index(drop=True)
     if df.empty:
         return pd.DataFrame(), ["Nenhuma linha com valor > 0."]
+
+    df = classificar_dataframe(df)
     return df, []
 
 

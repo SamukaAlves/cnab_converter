@@ -244,9 +244,43 @@ class CNABGenerator:
     def __init__(self, cfg):
         self.cfg = cfg
 
-    def generate(self, df, tipo_pagamento="PGA", num_lote=1, payment_date=None):
+    def generate(self, df, tipo_pagamento="PGA", num_lote=1, payment_date=None, forma_lancamento=None):
+        """
+        Gera o conteúdo CNAB para um DataFrame já pertencente a UM ÚNICO grupo
+        (mesmo tipo_pagamento / forma_lancamento).
+
+        `forma_lancamento`, quando informado, prevalece sobre o valor fixo do
+        config.json — isso permite gerar múltiplos arquivos (um por grupo)
+        na mesma execução, sem recriar o ConfigLoader a cada chamada.
+        Se não for informado, o comportamento antigo (usar o valor do
+        config.json) é mantido intacto — retrocompatível com chamadas antigas.
+        """
+        tipo  = str(tipo_pagamento).upper()
+        forma = str(forma_lancamento or self.cfg.lote.get("forma_lancamento", "03")).zfill(2)
+
+        # Garante que o header do lote reflita a forma real usada nesta chamada
+        self.cfg.lote["forma_lancamento"] = forma
+
+        # Boletos: formas 30/31 → delegar para BoletoGenerator
+        if forma in ("30", "31"):
+            from logic.boleto_generator import BoletoGenerator
+            bgen = BoletoGenerator(self.cfg)
+            pags = self._bol(df)
+            return bgen.gerar(pags, payment_date=payment_date)
+
+        # Contas de arrecadação/convênio (água, luz, telefone, tributos):
+        # código de barras começa com '8' e usa o Segmento O, não o J.
+        # Marcador interno "32" (não é um código real do BB — apenas
+        # nossa chave de agrupamento; o valor real gravado no arquivo,
+        # '11', está fixo em TributoGenerator.FORMA_LANCAMENTO).
+        if forma == "32":
+            from logic.boleto_generator import TributoGenerator
+            tgen = TributoGenerator(self.cfg)
+            pags = self._bol(df)  # mesmo parser: nome/valor/codigo_barras/seu_numero
+            return tgen.gerar(pags, payment_date=payment_date)
+
+        # Transferências / Aplicações: fluxo existente inalterado
         gen  = CNAB240Generator(self.cfg)
-        tipo = str(tipo_pagamento).upper()
         pags = self._apl(df) if tipo in ("APLICACAO", "APLICACOES") else self._pag(df)
         return gen.gerar(pags, payment_date=payment_date)
 
@@ -268,6 +302,27 @@ class CNABGenerator:
                 "valor": val,
                 "seu_numero": str(r.get("identificador", "")).strip(),
                 "data_pagamento": str(r.get("data_pagamento", "")).strip(),
+            })
+        return res
+
+    def _bol(self, df):
+        """Mapeia DataFrame → lista de dicts para geração de boletos."""
+        res = []
+        for _, r in df.iterrows():
+            cod   = str(r.get("codigo_barras", "")).strip()
+            nome  = str(r.get("nome", "")).strip()
+            doc   = _nums(r.get("cpf_cnpj", ""))
+            val   = _pv(r.get("valor", 0))
+            if not (cod and nome and val > 0):
+                continue
+            res.append({
+                "nome":            nome,
+                "documento":       doc,
+                "codigo_barras":   cod,
+                "valor":           val,
+                "seu_numero":      str(r.get("identificador", "")).strip(),
+                "data_pagamento":  str(r.get("data_pagamento", "")).strip(),
+                "data_vencimento": str(r.get("data_vencimento", "")).strip(),
             })
         return res
 

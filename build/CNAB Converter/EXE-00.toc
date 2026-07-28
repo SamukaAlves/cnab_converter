@@ -67,22 +67,24 @@
    'Converter\\localpycs\\pyimod04_pywin32.pyc',
    'PYMODULE'),
   ('pyiboot01_bootstrap',
-   'C:\\Users\\samuel.alves\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages\\PyInstaller\\loader\\pyiboot01_bootstrap.py',
+   'C:\\Users\\samuel.alves\\OneDrive - '
+   'Funpresp-Jud\\Documentos\\cnab_converter\\venv_estavel\\Lib\\site-packages\\PyInstaller\\loader\\pyiboot01_bootstrap.py',
    'PYSOURCE'),
   ('pyi_rth_inspect',
-   'C:\\Users\\samuel.alves\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_inspect.py',
+   'C:\\Users\\samuel.alves\\OneDrive - '
+   'Funpresp-Jud\\Documentos\\cnab_converter\\venv_estavel\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_inspect.py',
    'PYSOURCE'),
   ('pyi_rth_pkgutil',
-   'C:\\Users\\samuel.alves\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgutil.py',
+   'C:\\Users\\samuel.alves\\OneDrive - '
+   'Funpresp-Jud\\Documentos\\cnab_converter\\venv_estavel\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgutil.py',
    'PYSOURCE'),
   ('pyi_rth_multiprocessing',
-   'C:\\Users\\samuel.alves\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py',
-   'PYSOURCE'),
-  ('pyi_rth_setuptools',
-   'C:\\Users\\samuel.alves\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_setuptools.py',
+   'C:\\Users\\samuel.alves\\OneDrive - '
+   'Funpresp-Jud\\Documentos\\cnab_converter\\venv_estavel\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py',
    'PYSOURCE'),
   ('pyi_rth_pyqt5',
-   'C:\\Users\\samuel.alves\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pyqt5.py',
+   'C:\\Users\\samuel.alves\\OneDrive - '
+   'Funpresp-Jud\\Documentos\\cnab_converter\\venv_estavel\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pyqt5.py',
    'PYSOURCE'),
   ('main',
    'C:\\Users\\samuel.alves\\OneDrive - '
@@ -91,9 +93,9 @@
  [],
  False,
  False,
- 1780510614,
+ 1783434733,
  [('runw.exe',
-   'C:\\Users\\samuel.alves\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',
+   'C:\\Users\\samuel.alves\\OneDrive - '
+   'Funpresp-Jud\\Documentos\\cnab_converter\\venv_estavel\\Lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',
    'EXECUTABLE')],
- 'C:\\Program '
- 'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\\python313.dll')
+ 'C:\\Users\\samuel.alves\\AppData\\Local\\Programs\\Python\\Python312\\python312.dll')
